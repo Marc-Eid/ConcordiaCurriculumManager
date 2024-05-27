@@ -1,4 +1,4 @@
-import globalPgq from 'pg-promise';
+import sql from 'mssql';
 import { DataType } from './DataType';
 
 export default class Role implements DataType {
@@ -15,8 +15,25 @@ export default class Role implements DataType {
     this.ModifiedDate = obj.ModifiedDate;
   }
 
-  CreateQuery(task: globalPgq.ITask<{}>): Promise<null>[] {
-    return [task.none('INSERT INTO "Roles" ("Id", "UserRole", "CreatedDate", "ModifiedDate") VALUES($1, $2, $3, $4) ON CONFLICT ("Id") DO NOTHING', [this.Id, this.UserRole, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString()])];
+  async CreateQuery(pool: sql.ConnectionPool): Promise<void> {
+    const roleInsertQuery = `
+      INSERT INTO Roles (Id, UserRole, CreatedDate, ModifiedDate)
+      VALUES (@Id, @UserRole, @CreatedDate, @ModifiedDate);
+  `;
+
+    const request = pool.request();
+    request.input('Id', sql.VarChar, this.Id)
+      .input('UserRole', sql.Int, this.UserRole)
+      .input('CreatedDate', sql.DateTime, this.CreatedDate)
+      .input('ModifiedDate', sql.DateTime, this.ModifiedDate);
+
+    try {
+      await request.query(roleInsertQuery);
+    } catch (error) {
+      if ((error as sql.RequestError).number !== 2627) {
+        throw error;
+      }
+    }
   }
 
   private validateParameter(obj: any) {

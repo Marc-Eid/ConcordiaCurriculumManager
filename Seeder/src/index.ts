@@ -11,11 +11,6 @@ import CourseGrouping from './types/CourseGrouping';
 
 require('dotenv').config();
 const onlyValidateData: boolean = process.argv[2] === '--validateData';
-const connectionString: string = process.env.ConnectionString as string;
-
-if (!onlyValidateData && (!connectionString || connectionString.trim() === '')) {
-  throw new Error('Connection string cannot be empty or null');
-}
 
 const rolesJsonFilePath = path.resolve(__dirname, 'data', 'Roles.json');
 const rolesData = readFile(rolesJsonFilePath, Role);
@@ -42,7 +37,7 @@ const courseGroupingJsonFilePath = path.resolve(__dirname, 'data', 'CourseGroupi
 const courseGroupingData = readFile(courseGroupingJsonFilePath, CourseGrouping);
 
 if (!onlyValidateData) {
-  seedDataBase(connectionString, [
+  seedDataBase([
     rolesData,
     usersData,
     courseComponentsData,

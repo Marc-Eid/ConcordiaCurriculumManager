@@ -1,4 +1,4 @@
-import globalPgq from 'pg-promise';
+import sql from 'mssql';
 import { DataType } from './DataType';
 
 export default class User implements DataType {
@@ -23,10 +23,50 @@ export default class User implements DataType {
     this.ModifiedDate = obj.ModifiedDate;
   }
 
-  CreateQuery(task: globalPgq.ITask<{}>): Promise<null>[] {
-    const insertIntoUserTable = task.none('INSERT INTO "Users" ("Id", "FirstName", "LastName", "Email", "Password", "CreatedDate", "ModifiedDate") VALUES($1, $2, $3, $4, $5, $6, $7) ON CONFLICT ("Id") DO NOTHING', [this.Id, this.FirstName, this.LastName, this.Email, this.Password, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString()]);
-    const insertIntoUserRoleTable = this.Roles.map(role => task.none('INSERT INTO "RoleUser" ("RolesId", "UsersId") VALUES($1, $2) ON CONFLICT ("RolesId", "UsersId") DO NOTHING', [role, this.Id]));
-    return [insertIntoUserTable, ...insertIntoUserRoleTable];
+
+  async CreateQuery(pool: sql.ConnectionPool): Promise<void> {
+    const userInsertQuery = `
+    INSERT INTO Users (Id, FirstName, LastName, Email, Password, CreatedDate, ModifiedDate)
+    VALUES (@Id, @FirstName, @LastName, @Email, @Password, @CreatedDate, @ModifiedDate);
+    `;
+
+    const userRoleInsertQuery = `
+    INSERT INTO RoleUser (RolesId, UsersId)
+    VALUES (@RolesId, @UsersId);
+    `;
+
+    const request = pool.request();
+    request.input('Id', sql.VarChar, this.Id)
+      .input('FirstName', sql.VarChar, this.FirstName)
+      .input('LastName', sql.VarChar, this.LastName)
+      .input('Email', sql.VarChar, this.Email)
+      .input('Password', sql.VarChar, this.Password)
+      .input('CreatedDate', sql.DateTime, this.CreatedDate)
+      .input('ModifiedDate', sql.DateTime, this.ModifiedDate);
+
+    try {
+      await request.query(userInsertQuery);
+    } catch (error) {
+      if ((error as sql.RequestError).number !== 2627) {
+        throw error;
+      }
+    }
+
+    const roleRequests = this.Roles.map(async (role) => {
+      const roleRequest = pool.request();
+      roleRequest.input('RolesId', sql.VarChar, role)
+        .input('UsersId', sql.VarChar, this.Id);
+
+      try {
+        await roleRequest.query(userRoleInsertQuery);
+      } catch (error) {
+        if ((error as sql.RequestError).number !== 2627) {
+          throw error;
+        }
+      }
+    });
+
+    await Promise.all(roleRequests);
   }
 
   private validateParameter(obj: any) {

@@ -1,5 +1,5 @@
 import fs from 'fs';
-import globalPgq from 'pg-promise';
+import sql, { RequestError } from 'mssql';
 import { DataType, JsonData } from './types/DataType';
 
 export const readFile = <T extends DataType>(path: string, constructor: new (arg: any) => T) => {
@@ -30,31 +30,47 @@ export const readFile = <T extends DataType>(path: string, constructor: new (arg
   return jsonData;
 }
 
-const seedTable = async <T extends DataType>(t: globalPgq.ITask<{}>, json: JsonData<T>) => {
+const seedTable = async <T extends DataType>(pool: sql.ConnectionPool, json: JsonData<T>) => {
   try {
-    const queries = json.Data.map(item => item.CreateQuery(t)).flat();
-    await t.batch(queries);
+    for (const item of json.Data) {
+        await item.CreateQuery(pool);
+    }
     console.log(`${json.TableName} table(s) was/were seeded successfully!`);
   } catch (error) {
-    console.error(`Error while seeding ${json.TableName} table(s):`, error);
-    throw error;
+    if ((error as RequestError).number !== 2627 ){
+      console.error(`Error while seeding ${json.TableName} table:`, error);
+      throw error;  
+    }
   }
-}
+};
 
-export const seedDataBase = async (connectionString: string, jsonDataArray: JsonData<DataType>[]) => {
-  const pgp: globalPgq.IMain = globalPgq();
+
+export const seedDataBase = async (jsonDataArray: JsonData<DataType>[]) => {
+  const sqlConfig = {
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    server: process.env.DB_SERVER || 'localhost',
+    options: {
+      encrypt: true, // for azure
+      trustServerCertificate: true, // change to true for local dev / self-signed certs
+    },
+  };
+
+  let pool: sql.ConnectionPool | null = null;
 
   try {
-    const db = pgp(connectionString);
-    await db.tx(async (t: globalPgq.ITask<{}>) => {
-      for (const jsonData of jsonDataArray) {
-        await seedTable(t, jsonData);
-      }
-    });
+    pool = await sql.connect(sqlConfig);
+
+    for (const jsonData of jsonDataArray) {
+      await seedTable(pool, jsonData);
+    }
   } catch (error) {
     console.error('Error while seeding the database:', error);
     throw error;
   } finally {
-    pgp.end();
+    // if (pool?.connected) {
+    //   await pool.close();
+    // }
   }
 }

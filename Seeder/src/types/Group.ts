@@ -1,4 +1,4 @@
-import globalPgq from 'pg-promise';
+import sql from 'mssql';
 import { DataType } from './DataType';
 
 export default class Group implements DataType {
@@ -19,29 +19,59 @@ export default class Group implements DataType {
     this.ModifiedDate = obj.ModifiedDate;
   }
 
-  CreateQuery(task: globalPgq.ITask<{}>): Promise<null>[] {
-    const insertIntoGroupTable = task.none(
-      'INSERT INTO "Groups" ("Id", "Name", "CreatedDate", "ModifiedDate") VALUES($1, $2, $3, $4) ON CONFLICT ("Id") DO NOTHING',
-      [this.Id, this.Name, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString()]
-    );
 
-    const insertIntoGroupUserTable = this.Members.map(memberId => 
-      task.none(
-        'INSERT INTO "GroupUser" ("GroupsId", "MembersId") VALUES($1, $2) ON CONFLICT ("GroupsId", "MembersId") DO NOTHING',
-        [this.Id, memberId]
-      )
-    );
 
-    const insertIntoGroupMastersTable = this.GroupMasters.map(masterId => 
-      task.none(
-        'INSERT INTO "GroupUser1" ("MasteredGroupsId", "GroupMastersId") VALUES($1, $2) ON CONFLICT ("MasteredGroupsId", "GroupMastersId") DO NOTHING',
-        [this.Id, masterId]
-      )
-    );
+  async CreateQuery(pool: sql.ConnectionPool): Promise<void> {
 
-    return [insertIntoGroupTable, ...insertIntoGroupUserTable, ...insertIntoGroupMastersTable];
+    const groupInsertQuery = `INSERT INTO Groups (Id, Name, CreatedDate, ModifiedDate) VALUES (@Id, @Name, @CreatedDate, @ModifiedDate);`;
+    const groupUserInsertQuery = `INSERT INTO GroupUser (GroupsId, MembersId) VALUES (@GroupsId, @MembersId);`;
+    const groupMastersInsertQuery = `INSERT INTO GroupUser1 (MasteredGroupsId, GroupMastersId) VALUES (@MasteredGroupsId, @GroupMastersId);`;
+
+    const request = pool.request();
+    request.input('Id', sql.VarChar, this.Id)
+      .input('Name', sql.VarChar, this.Name)
+      .input('CreatedDate', sql.DateTime, this.CreatedDate)
+      .input('ModifiedDate', sql.DateTime, this.ModifiedDate);
+
+    try {
+      await request.query(groupInsertQuery);
+    } catch (error) {
+      if ((error as sql.RequestError).number !== 2627) {
+        throw error;
+      }
+    }
+
+    const memberRequests = this.Members.map(async (memberId) => {
+      const memberRequest = pool.request();
+      memberRequest.input('GroupsId', sql.VarChar, this.Id)
+        .input('MembersId', sql.VarChar, memberId);
+
+      try {
+        await memberRequest.query(groupUserInsertQuery);
+      } catch (error) {
+        if ((error as sql.RequestError).number !== 2627) {
+          throw error;
+        }
+      }
+    });
+
+    const masterRequests = this.GroupMasters.map(async (masterId) => {
+      const masterRequest = pool.request();
+      masterRequest.input('MasteredGroupsId', sql.VarChar, this.Id)
+        .input('GroupMastersId', sql.VarChar, masterId);
+
+      try {
+        await masterRequest.query(groupMastersInsertQuery);
+      } catch (error) {
+        if ((error as sql.RequestError).number !== 2627) {
+          throw error;
+        }
+      }
+    });
+
+    await Promise.all([...memberRequests, ...masterRequests]);
   }
-
+    
   private validateParameter(obj: any) {
     if (obj === null || obj === undefined)
       throw new Error('Parameter is not defined.');
