@@ -1,4 +1,4 @@
-import globalPgq from 'pg-promise';
+import sql, { RequestError } from 'mssql';
 import { DataType } from './DataType';
 import { CourseCourseComponent } from './CourseCourseComponent';
 
@@ -42,11 +42,63 @@ export default class Course implements DataType {
     this.ModifiedDate = obj.ModifiedDate;
   }
 
-  CreateQuery(task: globalPgq.ITask<{}>): Promise<null>[] {
-    const insertIntoCourse = task.none('INSERT INTO "Courses" ("Id", "CourseID", "Subject", "Catalog", "Title", "Description", "CourseNotes", "CreditValue", "PreReqs", "Career", "EquivalentCourses", "CourseState", "Version", "Published", "CreatedDate", "ModifiedDate") VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) ON CONFLICT ("Id") DO NOTHING', [this.Id, this.CourseID, this.Subject, this.Catalog, this.Title, this.Description, this.CourseNotes, this.CreditValue, this.PreReqs, this.Career, this.EquivalentCourses, this.CourseState, this.Version, this.Published, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString()]);
-    const insertIntoCourseCourseComponents = this.CourseCourseComponents.map(c => task.none('INSERT INTO "CourseCourseComponents" ("Id", "CourseId", "ComponentCode", "CreatedDate", "ModifiedDate") VALUES($1, $2, $3, $4, $5) ON CONFLICT("Id") DO NOTHING', [c.Id, this.Id, c.ComponentCode, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString()]));
-    return [insertIntoCourse, ...insertIntoCourseCourseComponents];
+  async CreateQuery(pool: sql.ConnectionPool): Promise<void> {
+    const courseInsertQuery = `
+      INSERT INTO Courses (Id, CourseID, Subject, Catalog, Title, Description, CourseNotes, CreditValue, PreReqs, Career, EquivalentCourses, CourseState, Version, Published, CreatedDate, ModifiedDate) 
+      VALUES (@Id, @CourseID, @Subject, @Catalog, @Title, @Description, @CourseNotes, @CreditValue, @PreReqs, @Career, @EquivalentCourses, @CourseState, @Version, @Published, @CreatedDate, @ModifiedDate);
+    `;
+
+    const courseComponentInsertQuery = `
+      INSERT INTO CourseCourseComponents (Id, CourseId, ComponentCode, CreatedDate, ModifiedDate) 
+      VALUES (@CompId, @CourseId, @ComponentCode, @CreatedDate, @ModifiedDate);
+    `;
+
+    const request = pool.request();
+    request.input('Id', sql.VarChar, this.Id)
+      .input('CourseID', sql.VarChar, this.CourseID)
+      .input('Subject', sql.VarChar, this.Subject)
+      .input('Catalog', sql.VarChar, this.Catalog)
+      .input('Title', sql.VarChar, this.Title)
+      .input('Description', sql.VarChar, this.Description)
+      .input('CourseNotes', sql.VarChar, this.CourseNotes)
+      .input('CreditValue', sql.VarChar, this.CreditValue)
+      .input('PreReqs', sql.VarChar, this.PreReqs)
+      .input('Career', sql.Int, this.Career)
+      .input('EquivalentCourses', sql.VarChar, this.EquivalentCourses)
+      .input('CourseState', sql.Int, this.CourseState)
+      .input('Version', sql.Int, this.Version)
+      .input('Published', sql.Bit, this.Published)
+      .input('CreatedDate', sql.DateTime, this.CreatedDate)
+      .input('ModifiedDate', sql.DateTime, this.ModifiedDate);
+
+    try {
+      await request.query(courseInsertQuery);
+    } catch (error) {
+      if ((error as sql.RequestError).number !== 2627) {
+        throw error;
+      }
+    }
+
+    const componentRequests = this.CourseCourseComponents.map(c => {
+      const componentRequest = pool.request();
+      componentRequest.input('CompId', sql.VarChar, c.Id)
+        .input('CourseId', sql.VarChar, this.Id)
+        .input('ComponentCode', sql.Int, c.ComponentCode)
+        .input('CreatedDate', sql.DateTime, this.CreatedDate)
+        .input('ModifiedDate', sql.DateTime, this.ModifiedDate);
+
+      return componentRequest.query(courseComponentInsertQuery)
+        .catch((error) => {
+          if ((error as sql.RequestError).number !== 2627) {
+            throw error;
+          }
+        });
+    });
+
+    await Promise.all(componentRequests);
   }
+
+
 
   private validateParameter(obj: any) {
     if (obj === null || obj === undefined)

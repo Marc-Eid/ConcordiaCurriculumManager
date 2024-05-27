@@ -1,4 +1,4 @@
-import globalPgq from 'pg-promise';
+import sql from 'mssql';
 import { DataType } from './DataType';
 
 type CourseGroupingReference = {
@@ -48,13 +48,79 @@ export default class CourseGrouping implements DataType {
     this.ModifiedDate = obj.ModifiedDate;
   }
 
-  CreateQuery(task: globalPgq.ITask<{}>): Promise<null>[] {
-    const insertIntoCourseGrouping = task.none('INSERT INTO "CourseGroupings" ("Id", "CommonIdentifier", "Name", "RequiredCredits", "IsTopLevel", "School", "Description", "Notes", "State", "Version", "Published", "CreatedDate", "ModifiedDate") VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) ON CONFLICT ("Id") DO NOTHING', [this.Id, this.CommonIdentifier, this.Name, this.RequiredCredits, this.IsTopLevel, this.School, this.Description, this.Notes, this.State, this.Version, this.Published, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString()]);
-    const insertIntoCourseGroupingReferences = this.CourseGroupingReferences.map(c => task.none('INSERT INTO "CourseGroupingReferences" ("Id", "ParentGroupId", "ChildGroupCommonIdentifier", "CreatedDate", "ModifiedDate", "GroupingType") VALUES($1, $2, $3, $4, $5, $6) ON CONFLICT ("Id") DO NOTHING', [c.Id, this.Id, c.ChildGroupCommonIdentifier, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString(), c.GroupingType]))
-    const insertIntoCourseGroupingCourseIdentifier = this.CourseGroupingCourseIdentifier.map(c => task.none('INSERT INTO "CourseGroupingCourseIdentifier" ("CourseGroupingId", "CourseIdentifiersId") VALUES($1, $2) ON CONFLICT ("CourseGroupingId", "CourseIdentifiersId") DO NOTHING', [c.CourseGroupingId, c.CourseIdentifiersId]))
 
-    return [insertIntoCourseGrouping, ...insertIntoCourseGroupingReferences, ...insertIntoCourseGroupingCourseIdentifier];
+async CreateQuery(pool: sql.ConnectionPool): Promise<void> {
+
+  const courseGroupingInsertQuery = `
+    INSERT INTO CourseGroupings (Id, CommonIdentifier, Name, RequiredCredits, IsTopLevel, School, Description, Notes, State, Version, Published, CreatedDate, ModifiedDate)
+    VALUES (@Id, @CommonIdentifier, @Name, @RequiredCredits, @IsTopLevel, @School, @Description, @Notes, @State, @Version, @Published, @CreatedDate, @ModifiedDate);`;
+
+const courseGroupingReferenceInsertQuery = `
+    INSERT INTO CourseGroupingReferences (Id, ParentGroupId, ChildGroupCommonIdentifier, CreatedDate, ModifiedDate, GroupingType)
+    VALUES (@RefId, @ParentGroupId, @ChildGroupCommonIdentifier, @CreatedDate, @ModifiedDate, @GroupingType);`;
+
+const courseGroupingCourseIdentifierInsertQuery = `
+    INSERT INTO CourseGroupingCourseIdentifier (CourseGroupingId, CourseIdentifiersId)
+    VALUES (@CourseGroupingId, @CourseIdentifiersId);`;
+
+  const request = pool.request();
+  request.input('Id', sql.VarChar, this.Id)
+    .input('CommonIdentifier', sql.VarChar, this.CommonIdentifier)
+    .input('Name', sql.VarChar, this.Name)
+    .input('RequiredCredits', sql.VarChar, this.RequiredCredits)
+    .input('IsTopLevel', sql.Bit, this.IsTopLevel)
+    .input('School', sql.Int, this.School)
+    .input('Description', sql.VarChar, this.Description)
+    .input('Notes', sql.VarChar, this.Notes)
+    .input('State', sql.Int, this.State)
+    .input('Version', sql.Int, this.Version)
+    .input('Published', sql.Bit, this.Published)
+    .input('CreatedDate', sql.DateTime, this.CreatedDate)
+    .input('ModifiedDate', sql.DateTime, this.ModifiedDate);
+
+  try {
+    await request.query(courseGroupingInsertQuery);
+  } catch (error) {
+    if ((error as sql.RequestError).number !== 2627) {
+      throw error;
+    }
   }
+
+  const referenceRequests = this.CourseGroupingReferences.map(async (c) => {
+    const referenceRequest = pool.request();
+    referenceRequest.input('RefId', sql.VarChar, c.Id)
+      .input('ParentGroupId', sql.VarChar, this.Id)
+      .input('ChildGroupCommonIdentifier', sql.VarChar, c.ChildGroupCommonIdentifier)
+      .input('CreatedDate', sql.DateTime, this.CreatedDate)
+      .input('ModifiedDate', sql.DateTime, this.ModifiedDate)
+      .input('GroupingType', sql.Int, c.GroupingType);
+
+    try {
+      await referenceRequest.query(courseGroupingReferenceInsertQuery);
+    } catch (error) {
+      if ((error as sql.RequestError).number !== 2627) {
+        throw error;
+      }
+    }
+  });
+
+  const courseIdentifierRequests = this.CourseGroupingCourseIdentifier.map(async (c) => {
+    const courseIdentifierRequest = pool.request();
+    courseIdentifierRequest.input('CourseGroupingId', sql.VarChar, c.CourseGroupingId)
+      .input('CourseIdentifiersId', sql.VarChar, c.CourseIdentifiersId);
+
+    try {
+      await courseIdentifierRequest.query(courseGroupingCourseIdentifierInsertQuery);
+    } catch (error) {
+      if ((error as sql.RequestError).number !== 2627) {
+        throw error;
+      }
+    }
+  });
+
+  await Promise.all([...referenceRequests, ...courseIdentifierRequests]);
+}
+
 
   private validateParameter(obj: any) {
     if (obj === null || obj === undefined)

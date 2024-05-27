@@ -1,4 +1,4 @@
-import globalPgq from 'pg-promise';
+import sql from 'mssql';
 
 export interface JsonData<T extends DataType> {
   TableName: string,
@@ -11,5 +11,5 @@ export interface DataType {
   Id: string,
   CreatedDate: Date,
   ModifiedDate: Date,
-  CreateQuery(task: globalPgq.ITask<{}>): Promise<null>[]
+  CreateQuery(pool: sql.ConnectionPool): any
 }

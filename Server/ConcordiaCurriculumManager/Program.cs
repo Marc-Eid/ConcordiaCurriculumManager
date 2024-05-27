@@ -76,11 +76,8 @@ public class Program
                        .Bind(builder.Configuration.GetSection(DatabaseSettings.SectionName))
                        .Validate(dbSettings => dbSettings.ConnectionString is not null);
 
-        var dbDataSource = new NpgsqlDataSourceBuilder(dbSetting!.ConnectionString).Build();
-        builder.Services.AddDbContext<CCMDbContext>((options) =>
-        {
-            options.UseNpgsql(dbDataSource);
-        });
+        builder.Services.AddDbContext<CCMDbContext>(options =>
+        options.UseSqlServer(dbSetting!.ConnectionString));
 
         builder.Host.UseSerilog((context, logger) =>
         {

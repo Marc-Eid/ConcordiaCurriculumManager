@@ -1,6 +1,5 @@
-import globalPgq from 'pg-promise';
+import sql from 'mssql';
 import { DataType } from './DataType';
-import { CourseCourseComponent } from './CourseCourseComponent';
 
 export default class CourseReference implements DataType {
   Id: string;
@@ -20,10 +19,30 @@ export default class CourseReference implements DataType {
     this.ModifiedDate = obj.ModifiedDate;
   }
 
-  CreateQuery(task: globalPgq.ITask<{}>): Promise<null>[] {
-    return [task.none('INSERT INTO "CourseReferences" ("Id", "CourseReferencingId", "CourseReferencedId", "State", "CreatedDate", "ModifiedDate") VALUES($1, $2, $3, $4, $5, $6) ON CONFLICT ("Id") DO NOTHING', [this.Id, this.CourseReferencingId, this.CourseReferencedId, this.State, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString()])];
-  }
+  async CreateQuery(pool: sql.ConnectionPool): Promise<void> {
+    const courseReferenceInsertQuery = `
+      INSERT INTO CourseReferences (Id, CourseReferencingId, CourseReferencedId, State, CreatedDate, ModifiedDate)
+      VALUES (@Id, @CourseReferencingId, @CourseReferencedId, @State, @CreatedDate, @ModifiedDate);
+  `;
 
+    const request = pool.request();
+    request.input('Id', sql.VarChar, this.Id)
+      .input('CourseReferencingId', sql.VarChar, this.CourseReferencingId)
+      .input('CourseReferencedId', sql.VarChar, this.CourseReferencedId)
+      .input('State', sql.Int, this.State)
+      .input('CreatedDate', sql.DateTime, this.CreatedDate)
+      .input('ModifiedDate', sql.DateTime, this.ModifiedDate);
+
+    try {
+      await request.query(courseReferenceInsertQuery);
+    } catch (error) {
+      if ((error as sql.RequestError).number !== 2627) {
+        throw error;
+      }
+    }
+  }
+  
+  
   private validateParameter(obj: any) {
     if (obj === null || obj === undefined)
       throw new Error('Parameter is not defined.');

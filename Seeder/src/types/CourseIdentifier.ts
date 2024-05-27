@@ -1,4 +1,4 @@
-import globalPgq from 'pg-promise';
+import sql from 'mssql';
 import { DataType } from './DataType';
 
 export default class CourseIdentifier implements DataType {
@@ -15,10 +15,29 @@ export default class CourseIdentifier implements DataType {
     this.ModifiedDate = obj.ModifiedDate;
   }
 
-  CreateQuery(task: globalPgq.ITask<{}>): Promise<null>[] {
-    return [task.none('INSERT INTO "CourseIdentifiers" ("Id", "ConcordiaCourseId", "CreatedDate", "ModifiedDate") VALUES($1, $2, $3, $4) ON CONFLICT ("Id") DO NOTHING', [this.Id, this.ConcordiaCourseId, this.CreatedDate.toISOString(), this.ModifiedDate.toISOString()])];
-  }
 
+  async CreateQuery(pool: sql.ConnectionPool): Promise<void> {
+    const courseIdentifierInsertQuery = `
+      INSERT INTO CourseIdentifiers (Id, ConcordiaCourseId, CreatedDate, ModifiedDate)
+      VALUES (@Id, @ConcordiaCourseId, @CreatedDate, @ModifiedDate);`;
+
+    const request = pool.request();
+    request.input('Id', sql.VarChar, this.Id)
+      .input('ConcordiaCourseId', sql.VarChar, this.ConcordiaCourseId)
+      .input('CreatedDate', sql.DateTime, this.CreatedDate)
+      .input('ModifiedDate', sql.DateTime, this.ModifiedDate);
+
+    try {
+      await request.query(courseIdentifierInsertQuery);
+    } catch (error) {
+      if ((error as sql.RequestError).number !== 2627) {
+        throw error;
+      }
+    }
+  }
+  
+  
+  
   private validateParameter(obj: any) {
     if (obj === null || obj === undefined)
       throw new Error('Parameter is not defined.');
